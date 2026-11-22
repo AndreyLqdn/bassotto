@@ -21,10 +21,19 @@ cp Support/App/Info.plist       "$APP/Contents/Info.plist"
 cp "$BIN/BassottoWidget"        "$APPEX/Contents/MacOS/BassottoWidget"
 cp Support/Widget/Info.plist    "$APPEX/Contents/Info.plist"
 
-# Ad-hoc signing: inside-out (extension first, then the app).
-codesign --force --sign - --timestamp=none \
+# Signing identity: $SIGN_IDENTITY if set, else the first valid "Apple Development"
+# certificate (free with an Apple ID in Xcode → Settings → Accounts), else ad-hoc.
+# Widgets need a real certificate to appear in the widget gallery.
+IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+  | awk -F'"' '/Apple Development/ {print $2; exit}')}"
+IDENTITY="${IDENTITY:--}"
+[[ "$IDENTITY" == "-" ]] && echo "Signing ad-hoc (widget may not appear in the gallery)" \
+                         || echo "Signing with: $IDENTITY"
+
+# Sign inside-out: extension first, then the app.
+codesign --force --sign "$IDENTITY" --timestamp=none \
   --entitlements Support/Widget/Widget.entitlements "$APPEX"
-codesign --force --sign - --timestamp=none "$APP"
+codesign --force --sign "$IDENTITY" --timestamp=none "$APP"
 codesign --verify --deep --strict "$APP"
 echo "Built $APP"
 
