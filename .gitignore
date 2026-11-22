@@ -1,5 +1,6 @@
 # SwiftPM / build output
 .build/
+.swiftpm/
 build/
 *.xcodeproj/
 xcuserdata/
@@ -18,3 +19,4 @@ Personal/
 .vscode/
 .cursor/
 .idea/
+.claude/
