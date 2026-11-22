@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds Bassotto.app with the Command Line Tools only (no Xcode).
 #   ./scripts/bundle.sh            build + bundle into build/Bassotto.app
-#   ./scripts/bundle.sh --install  also copy to ~/Applications, register the widget and launch
+#   ./scripts/bundle.sh --install  also copy to /Applications, register the widget and launch
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,9 +53,8 @@ codesign --verify --deep --strict "$APP"
 echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
-  DEST="$HOME/Applications/Bassotto.app"
+  DEST="/Applications/Bassotto.app"
   pkill -x Bassotto 2>/dev/null || true
-  mkdir -p "$HOME/Applications"
   rm -rf "$DEST"
   cp -R "$APP" "$DEST"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST"

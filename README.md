@@ -32,7 +32,10 @@ The `Personal/` folder is gitignored, so your content is never committed.
 ## Layout
 
 ```
-Sources/Bassotto/        menu bar app + the dog
+Sources/Bassotto/        menu bar app
+  Stage/                 transparent panel that carries the dog, walking along the Dock
+  Dog/                   the dog: state model + view (placeholder until the Blender clips)
+  System/                launch at login
 Sources/BassottoWidget/  WidgetKit extension
 Support/                 Info.plists and entitlements
 scripts/bundle.sh        builds, bundles and ad-hoc signs the .app
