@@ -20,6 +20,8 @@ enum Doxie {
         var ears = hex(0xD9945B)       // same as the body: the goose is one colour plus accents
         var eye = hex(0x000000)        // goose: #000000
         var shadowDot = hex(0xAAAAAA)  // NSColor.lightGray, one dot per 2×2 block
+        var tongue = hex(0xF2788C)
+        var tongueOutline = hex(0xD45A6E)
         static let classic = Palette()
         static let goose = Palette(body: hex(0xFFFFFF), outline: hex(0xD3D3D3), feet: hex(0xFFA500),
                                    nose: hex(0xFFA500), ears: hex(0xFFFFFF))
@@ -34,6 +36,8 @@ enum Doxie {
         var lying: CGFloat = 0                 // rest states come later; kept for the brain
         var eyesClosed = false
         var wag: CGFloat = 0                   // tail swing, radians
+        var tongue: CGFloat = 0                // 0…1, tongue out (running)
+        var tongueSwing: CGFloat = 0           // -1…1, tongue flapping
 
         init(pos: CGPoint, direction: CGFloat) {
             self.pos = pos
@@ -81,10 +85,16 @@ enum Doxie {
         let head2End = add(head1End, fwd, headLength2)
 
         // Dog extras, positioned off the same rig points.
-        let tailBase = add(bodyCenter, fwd, -bodyLength)
+        // A long, slim tail rising from the rump, swinging when he wags.
+        let tailBase = add(bodyCenter, fwd, -bodyLength - 2)
         let tailDir = unit(s.direction + 180 + s.wag * 180 / .pi)
-        let tailTip = add(add(tailBase, tailDir, 7), up, 6)
-        let ears: [(CGPoint, CGPoint)] = ([-1, 1] as [CGFloat]).map { side in
+        let tailMid = add(add(tailBase, tailDir, 7), up, 5)
+        let tailTip = add(add(tailMid, unit(s.direction + 180 + s.wag * 1.6 * 180 / .pi), 7), up, 4)
+        // Ears: the one on the far side is hidden behind the head unless he faces you or away.
+        let nearSide: CGFloat = right.y >= 0 ? 1 : -1
+        let showsBothEars = abs(right.y) < 0.35
+        let earSides: [CGFloat] = showsBothEars ? [-1, 1] : [nearSide]
+        let ears: [(CGPoint, CGPoint)] = earSides.map { side in
             let root = add(add(neckHeadPoint, right, side * 5), fwd, -2)
             let tip = add(add(add(root, up, -6 + s.neckLerp * 3), fwd, -2 - s.neckLerp * 5), right, side * 2)
             return (root, tip)
@@ -98,12 +108,15 @@ enum Doxie {
         }
 
         // Feet, then the dotted shadow over them (exactly the goose's order).
-        for foot in s.feet { c.fill(circle(foot, footRadius), p.feet) }
+        // Lying down, the paws are tucked under him.
+        if s.lying < 0.5 { for foot in s.feet { c.fill(circle(foot, footRadius), p.feet) } }
         c.fill(shadow(center: pos, rx: 26, ry: 15), p.shadowDot)                 // goose: 20 × 15
 
         // Outline pass (part width + 2).
         let body = (add(bodyCenter, fwd, bodyLength), add(bodyCenter, fwd, -bodyLength))
-        c.stroke(line(tailBase, tailTip), p.outline, width: 5 + outlinePad)
+        let tail = CGMutablePath()
+        tail.move(to: snap(tailBase)); tail.addQuadCurve(to: snap(tailTip), control: snap(tailMid))
+        c.stroke(tail, p.outline, width: 3 + outlinePad)
         c.stroke(line(body.0, body.1), p.outline, width: bodyRadius + outlinePad)
         c.stroke(line(neckBase, neckHeadPoint), p.outline, width: neckRadius + outlinePad)
         c.stroke(line(neckHeadPoint, head1End), p.outline, width: headRadius1 + outlinePad)
@@ -112,7 +125,7 @@ enum Doxie {
         c.stroke(line(add(underbodyCenter, fwd, underBodyLength), add(underbodyCenter, fwd, -underBodyLength)),
                  p.outline, width: underBodyRadius)
         // Fill pass.
-        c.stroke(line(tailBase, tailTip), p.body, width: 5)
+        c.stroke(tail, p.body, width: 3)
         c.stroke(line(body.0, body.1), p.body, width: bodyRadius)
         c.stroke(line(neckBase, neckHeadPoint), p.body, width: neckRadius)
         c.stroke(line(neckHeadPoint, head1End), p.body, width: headRadius1)
@@ -122,8 +135,15 @@ enum Doxie {
             c.stroke(line(a, b), p.outline, width: 6 + outlinePad)
             c.stroke(line(a, b), p.ears, width: 6)
         }
-        // Nose where the goose's beak is: a short round-capped dark stroke at the snout tip.
-        c.stroke(line(head2End, add(head2End, fwd, 2)), p.nose, width: 7)
+        // Tongue: hangs from under the snout and flaps while he runs.
+        if s.tongue > 0.05 {
+            let root = add(add(head2End, fwd, -3), up, -3)
+            let tip = add(add(add(root, up, -4 * s.tongue), fwd, -1 + s.tongueSwing), right, s.tongueSwing * 1.2)
+            c.stroke(line(root, tip), p.tongueOutline, width: 4 + 1)
+            c.stroke(line(root, tip), p.tongue, width: 4)
+        }
+        // A small dog nose at the snout tip (where the goose has its beak).
+        c.fill(circle(add(head2End, fwd, 2), 2.6), p.nose)
         // Eyes: the goose's formula.
         let spread = CGPoint(x: 1.3, y: 0.4)
         for side in [-1, 1] as [CGFloat] {

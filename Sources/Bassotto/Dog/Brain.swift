@@ -33,6 +33,8 @@ final class Brain {
     private var pauseUntil: TimeInterval = 0
     private var sleepWhenHome = false
     private var now: TimeInterval = 0
+    private var wagUntil: TimeInterval = 0
+    private var nextWagRoll: TimeInterval = 0
     private var accumulator: Double = 0
     private var steps: [(from: CGPoint, dir: CGPoint, start: TimeInterval)?] = [nil, nil, nil, nil]
     private var stepping: Bool { steps.contains { $0 != nil } }
@@ -124,7 +126,8 @@ final class Brain {
         case .roaming where t < pauseUntil:
             velocity = .zero                       // the goose hard-stops while it pauses
             solveFeet(time: t)
-            state.wag *= 0.9
+            state.tongue *= 0.9
+            wagTail(t)
             return
         default: break
         }
@@ -157,7 +160,20 @@ final class Brain {
         solveFeet(time: t)
         // Head low and forward when running; the tail wags while he trots.
         state.neckLerp += ((speed >= 200 ? 1 : 0) - state.neckLerp) * 0.075
-        state.wag = CGFloat(sin(t * 14)) * 0.35
+        // Tongue out and flapping while he runs.
+        state.tongue += ((speed >= 200 ? 1 : 0) - state.tongue) * 0.1
+        state.tongueSwing = CGFloat(sin(t * 20))
+        wagTail(t)
+    }
+
+    /// The tail wags in little bursts now and then, not all the time.
+    private func wagTail(_ t: TimeInterval) {
+        if t >= nextWagRoll {
+            nextWagRoll = t + .random(in: 1.5...4)
+            if Double.random(in: 0..<1) < 0.45 { wagUntil = t + .random(in: 0.8...1.8) }
+        }
+        let target: CGFloat = t < wagUntil ? CGFloat(sin(t * 16)) * 0.5 : 0
+        state.wag += (target - state.wag) * 0.35
     }
 
     /// Ease into lying down (facing the viewer) or back up onto his feet.

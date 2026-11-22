@@ -113,8 +113,8 @@ final class StageController: NSObject {
             brain.userLongGone()
         } else if idle >= roamAfter {
             brain.userWentIdle()
-        } else if idle < 1.5 {
-            brain.userCameBack()
+        } else if idle < 1.5, Date() >= walkRequestedUntil {
+            brain.userCameBack()               // (a walk you asked for isn't cut short)
         }
         if brain.isMoving { startLoop() } else { render() }
     }
@@ -148,8 +148,13 @@ final class StageController: NSObject {
 
     // MARK: Menu actions
 
+    /// A walk asked for from the menu: your own activity (clicking the menu, typing)
+    /// doesn't send him home for the next minute.
+    @ObservationIgnored private var walkRequestedUntil = Date.distantPast
+
     func goForAWalk() {
         if !isVisible { toggleVisible() }
+        walkRequestedUntil = Date().addingTimeInterval(60)
         brain?.goForAWalk()
         startLoop()
     }
