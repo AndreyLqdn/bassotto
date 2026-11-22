@@ -17,7 +17,7 @@ reminds you to take breaks, and goes quiet when you're on a call.
 Requirements: macOS 14+ and the Command Line Tools (`xcode-select --install`).
 
 ```sh
-make run     # build, install to ~/Applications, register the widget, launch
+make run     # build, install to /Applications, register the widget, launch
 make build   # build only, into build/Bassotto.app
 make clean
 ```
@@ -38,7 +38,7 @@ Sources/Bassotto/        menu bar app
   System/                launch at login
 Sources/BassottoWidget/  WidgetKit extension
 Support/                 Info.plists and entitlements
-scripts/bundle.sh        builds, bundles and ad-hoc signs the .app
+scripts/bundle.sh        builds, bundles and signs the .app (Apple Development cert if present, else ad-hoc)
 ```
 
 ## License
