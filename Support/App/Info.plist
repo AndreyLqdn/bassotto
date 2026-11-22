@@ -8,6 +8,8 @@
 	<string>Bassotto</string>
 	<key>CFBundleExecutable</key>
 	<string>Bassotto</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.bassotto.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>

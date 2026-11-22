@@ -1,144 +1,175 @@
 import AppKit
+import Observation
 import QuartzCore
-import SwiftUI
 
-/// Owns the stage panel and moves the dog along the ground (the top of the Dock,
-/// or the bottom of the screen when the Dock is hidden).
-///
-/// The display link only runs while he walks, so a resting dog costs ~0% CPU.
+/// Runs the dog: a full-screen transparent window that never moves, a frame loop that
+/// only ticks while he's walking, and a 1 s check of how long you've been idle.
 @MainActor
+@Observable
 final class StageController: NSObject {
-    let dog = DogModel()
-    var isVisible: Bool { dog.isVisible }
+    private(set) var isVisible = true
 
-    private let size = CGSize(width: 140, height: 120)
-    private let walkSpeed: CGFloat = 70     // points per second
-    private let runSpeed: CGFloat = 220
+    /// After this long without keyboard/mouse input he goes for a walk.
+    @ObservationIgnored private let roamAfter: TimeInterval = 20
+    /// After this long he goes home and sleeps.
+    @ObservationIgnored private let sleepAfter: TimeInterval = 600
 
-    private var panel: StagePanel?
-    private var displayLink: CADisplayLink?
-    private var lastTimestamp: CFTimeInterval?
-    private var x: CGFloat = 0
-    private var targetX: CGFloat = 0
-    private var speed: CGFloat = 70
-    private var restTask: Task<Void, Never>?
+    @ObservationIgnored private var panel: StagePanel?
+    @ObservationIgnored private var view: DoxieView?
+    @ObservationIgnored private var brain: Brain?
+    @ObservationIgnored private var link: CADisplayLink?
+    @ObservationIgnored private var timers: [Timer] = []
+    @ObservationIgnored private var shownMode: Brain.Mode?
 
     func start() {
-        let panel = StagePanel(size: size)
-        panel.contentView = StageHostingView(rootView: DogView(dog: dog))
-        self.panel = panel
+        let (home, bounds) = layout()
+        let brain = Brain(home: home, bounds: bounds)
+        self.brain = brain
 
-        x = ground.minX + (ground.maxX - ground.minX) * 0.3
-        targetX = x
-        place()
+        let panel = StagePanel(size: CGSize(width: 800, height: 600))
+        let view = DoxieView(frame: CGRect(origin: .zero, size: panel.frame.size))
+        view.onBoop = { [weak self] in self?.boop() }
+        panel.contentView = view
+        panel.ignoresMouseEvents = true
+        self.panel = panel
+        self.view = view
+        fitToScreen()
+        render()
         panel.orderFrontRegardless()
 
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(screensChanged),
-            name: NSApplication.didChangeScreenParametersNotification, object: nil
-        )
-        rest(for: 1.5)
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
+                                               name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        every(1) { $0.checkIdle() }
+        every(0.125) { $0.updateMouseCapture() }
+        every(4) { $0.maybeBlink() }
+    }
+
+    // MARK: Layout
+
+    /// Home is on the Dock's top edge, a little right of centre (the Dock is centred, so
+    /// this is always on it). He may wander anywhere above the Dock, below the menu bar.
+    private func layout() -> (home: CGPoint, bounds: CGRect) {
+        guard let screen = NSScreen.screens.first else { return (.zero, .zero) }
+        let f = screen.frame, v = screen.visibleFrame
+        let dockTop = f.maxY - v.minY                     // y-down
+        let menuBar = f.maxY - v.maxY
+        // He lies facing you with his chin and front paws just over the Dock edge.
+        let home = CGPoint(x: f.midX + 120, y: dockTop - 12 * DoxieView.scale)
+        let bounds = CGRect(x: f.minX + 60, y: menuBar + 70, width: f.width - 120, height: dockTop - menuBar - 75)
+        return (home, bounds)
+    }
+
+    private func fitToScreen() {
+        guard let screen = NSScreen.screens.first else { return }
+        panel?.setFrame(screen.frame, display: false)
+        view?.frame = CGRect(origin: .zero, size: screen.frame.size)
+    }
+
+    @objc private func screensChanged() {
+        let (home, bounds) = layout()
+        brain?.home = home
+        brain?.bounds = bounds
+        fitToScreen()
+        render()
+    }
+
+    // MARK: Frame loop
+
+    private func startLoop() {
+        guard link == nil, isVisible, let screen = panel?.screen ?? NSScreen.screens.first else { return }
+        let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        guard let brain else { return }
+        brain.update(time: link.timestamp)
+        render()
+        if !brain.isMoving {
+            link.invalidate()
+            self.link = nil
+        }
+    }
+
+    private func render() {
+        guard let brain, let view else { return }
+        view.render(brain.pose)
+        if brain.mode != shownMode {
+            if shownMode == .returning, brain.mode == .resting { view.hop() }   // plops down home
+            let head = CGPoint(x: brain.home.x + 14, y: brain.home.y - 4)
+            view.showZzz(at: brain.mode == .sleeping ? head : nil)
+            shownMode = brain.mode
+        }
+    }
+
+    // MARK: Idle detection (system counter: no permission, no content)
+
+    private func checkIdle() {
+        guard isVisible, let brain else { return }
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        if idle >= sleepAfter {
+            brain.userLongGone()
+        } else if idle >= roamAfter {
+            brain.userWentIdle()
+        } else if idle < 1.5 {
+            brain.userCameBack()
+        }
+        if brain.isMoving { startLoop() } else { render() }
+    }
+
+    private func maybeBlink() {
+        guard isVisible, let brain, brain.mode == .resting, Bool.random() else { return }
+        brain.blink = true; render()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self] in
+            self?.brain?.blink = false; self?.render()
+        }
+    }
+
+    /// The window only takes clicks when the cursor is over the dog.
+    private func updateMouseCapture() {
+        guard let panel, let brain, isVisible else { return }
+        let m = NSEvent.mouseLocation
+        let c = CGPoint(x: m.x, y: (NSScreen.screens.first?.frame.maxY ?? 0) - m.y)
+        let box = brain.hitBox, p = brain.state.pos, k = DoxieView.scale
+        let scaled = CGRect(x: p.x + (box.minX - p.x) * k, y: p.y + (box.minY - p.y) * k,
+                            width: box.width * k, height: box.height * k)
+        let over = scaled.contains(c)
+        if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
+    }
+
+    private func boop() {
+        guard let brain else { return }
+        if brain.mode == .sleeping { brain.userCameBack() }
+        view?.hop()
+        render()
     }
 
     // MARK: Menu actions
 
-    func callToCursor() {
+    func goForAWalk() {
         if !isVisible { toggleVisible() }
-        walk(to: NSEvent.mouseLocation.x - size.width / 2, speed: runSpeed)
+        brain?.goForAWalk()
+        startLoop()
     }
 
     func toggleVisible() {
-        dog.isVisible.toggle()
+        isVisible.toggle()
         if isVisible {
             panel?.orderFrontRegardless()
-            rest(for: 1)
+            render()
         } else {
-            stopWalking()
-            restTask?.cancel()
+            link?.invalidate(); link = nil
             panel?.orderOut(nil)
         }
     }
 
-    // MARK: Ground
-
-    /// The walkable line: primary screen, standing on top of the Dock when it's at the bottom.
-    private var ground: (minX: CGFloat, maxX: CGFloat, y: CGFloat) {
-        let screen = NSScreen.screens.first ?? NSScreen.main
-        let frame = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        return (frame.minX, frame.maxX - size.width, frame.minY)
-    }
-
-    private func place() {
-        let g = ground
-        x = min(max(x, g.minX), g.maxX)
-        panel?.setFrameOrigin(CGPoint(x: x, y: g.y))
-    }
-
-    @objc private func screensChanged() {
-        targetX = min(max(targetX, ground.minX), ground.maxX)
-        place()
-    }
-
-    // MARK: Behaviour
-
-    private func rest(for seconds: Double) {
-        restTask?.cancel()
-        restTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, let self, self.isVisible else { return }
-            self.wander()
+    private func every(_ seconds: TimeInterval, _ body: @escaping @MainActor (StageController) -> Void) {
+        let t = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { if let self { body(self) } }
         }
-    }
-
-    private func wander() {
-        let g = ground
-        var next = CGFloat.random(in: g.minX...g.maxX)
-        if abs(next - x) < 120 { next = x < (g.minX + g.maxX) / 2 ? x + 240 : x - 240 }
-        walk(to: next, speed: walkSpeed)
-    }
-
-    private func walk(to destination: CGFloat, speed: CGFloat) {
-        restTask?.cancel()
-        targetX = min(max(destination, ground.minX), ground.maxX)
-        self.speed = speed
-        dog.facingRight = targetX > x
-        dog.isWalking = true
-
-        if displayLink == nil, let screen = panel?.screen ?? NSScreen.screens.first {
-            lastTimestamp = nil
-            let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 24, maximum: 30, preferred: 30)
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        }
-    }
-
-    @objc private func tick(_ link: CADisplayLink) {
-        let now = link.timestamp
-        defer { lastTimestamp = now }
-        guard let last = lastTimestamp else { return }
-
-        let step = speed * CGFloat(now - last)
-        let remaining = targetX - x
-        if abs(remaining) <= step {
-            x = targetX
-            place()
-            arrived()
-        } else {
-            x += remaining > 0 ? step : -step
-            place()
-        }
-    }
-
-    private func arrived() {
-        stopWalking()
-        // Mostly short pauses, sometimes a proper nap.
-        rest(for: Bool.random() ? .random(in: 3...8) : .random(in: 12...30))
-    }
-
-    private func stopWalking() {
-        displayLink?.invalidate()
-        displayLink = nil
-        dog.isWalking = false
+        t.tolerance = seconds * 0.25
+        timers.append(t)
     }
 }

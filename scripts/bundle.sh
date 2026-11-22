@@ -18,6 +18,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APPEX/Contents/MacOS"
 
 cp "$BIN/Bassotto"              "$APP/Contents/MacOS/Bassotto"
 cp Support/App/Info.plist       "$APP/Contents/Info.plist"
+cp Support/App/AppIcon.icns     "$APP/Contents/Resources/AppIcon.icns"
 cp "$BIN/BassottoWidget"        "$APPEX/Contents/MacOS/BassottoWidget"
 cp Support/Widget/Info.plist    "$APPEX/Contents/Info.plist"
 

@@ -5,8 +5,10 @@ struct BassottoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Bassotto", systemImage: "dog.fill") {
+        MenuBarExtra {
             MenuContent(stage: appDelegate.stage)
+        } label: {
+            Image(nsImage: MenuBarIcon.image)
         }
     }
 }
@@ -25,8 +27,8 @@ private struct MenuContent: View {
     @State private var opensAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
-        Button("Come here") { stage.callToCursor() }
-        Button(stage.dog.isVisible ? "Put to bed" : "Wake up") { stage.toggleVisible() }
+        Button("Go for a walk") { stage.goForAWalk() }
+        Button(stage.isVisible ? "Put to bed" : "Wake up") { stage.toggleVisible() }
         Divider()
         Toggle("Open at login", isOn: $opensAtLogin)
             .onChange(of: opensAtLogin) { _, enabled in
