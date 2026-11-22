@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy to Personal/Personal.json (gitignored) and fill in. Bundled into the app at build time; never committed.",
+  "humanName": "",
+  "nicknames": [],
+  "city": "",
+  "dates": [
+    { "label": "birthday", "date": "YYYY-MM-DD" }
+  ],
+  "messages": [
+    "A note the dog will carry onto the screen."
+  ]
+}

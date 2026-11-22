@@ -1,0 +1,20 @@
+# SwiftPM / build output
+.build/
+build/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+
+# Blender & render output (sources live in Art/, renders are generated)
+Art/renders/
+*.blend1
+*.blend@
+
+# Personal content: never committed. Copy Personal.example.json to Personal/Personal.json.
+Personal/
+
+# macOS / editors
+.DS_Store
+.vscode/
+.cursor/
+.idea/
