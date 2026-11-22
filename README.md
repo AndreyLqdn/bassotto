@@ -5,6 +5,20 @@ reminds you to take breaks, and goes quiet when you're on a call.
 
 > Early work in progress.
 
+## Install
+
+Paste this into Terminal (macOS 14+, Apple Silicon):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AndreyLqdn/bassotto/main/install.sh | bash
+```
+
+It downloads the latest release, puts Bassotto in `/Applications` and launches him.
+Uninstall with the same command plus `-s -- --uninstall`.
+
+Prefer to download by hand? Grab `Bassotto.zip` from [Releases](https://github.com/AndreyLqdn/bassotto/releases).
+Builds aren't notarized yet, so the first time right-click the app → **Open**.
+
 ## Principles
 
 - **Native only.** Swift, SwiftUI and AppKit, plus Apple frameworks. No third-party dependencies.

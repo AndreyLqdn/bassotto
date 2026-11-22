@@ -1,0 +1,32 @@
+name: Release
+
+# Push a tag like v0.1.0 to build Bassotto.app and publish it as a GitHub Release.
+# install.sh always downloads the latest release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and bundle
+        run: ./scripts/bundle.sh
+
+      - name: Zip
+        run: |
+          cd build
+          ditto -c -k --keepParent Bassotto.app Bassotto.zip
+          shasum -a 256 Bassotto.zip | tee Bassotto.zip.sha256
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/Bassotto.zip build/Bassotto.zip.sha256 \
+            --title "Bassotto $GITHUB_REF_NAME" --generate-notes
