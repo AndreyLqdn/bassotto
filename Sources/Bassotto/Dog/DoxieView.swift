@@ -1,40 +1,32 @@
 import AppKit
 import QuartzCore
 
-/// The live dog: a full-screen, y-down layer tree. Each frame the dog's shapes are
-/// written into a pool of CAShapeLayers; the window server rasterises and composites
-/// them, so the app itself only does a little geometry per frame.
+/// The live dog: a full-screen, y-down layer tree. Each frame his shapes are written
+/// into a pool of CAShapeLayers and the window server draws them. The sleeping Zzz and
+/// the hop are pure Core Animation, so they cost the app nothing.
 final class DoxieView: NSView {
     var onBoop: () -> Void = {}
+    static let scale: CGFloat = 0.8
 
     private let dog = CALayer()
     private var pool: [CAShapeLayer] = []
-    private let bubble = CALayer()
-    private let bubbleBackground = CAShapeLayer()
-    private let bubbleText = CATextLayer()
-    private var bubbleString: String?
+    private var zzz: [CATextLayer] = []
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = .clear
         layer?.isGeometryFlipped = true             // y grows downwards, like the brain's coordinates
+        dog.frame = bounds
         layer?.addSublayer(dog)
-        layer?.addSublayer(bubble)
-
-        bubbleBackground.fillColor = CGColor(gray: 1, alpha: 0.95)
-        bubbleBackground.strokeColor = Doxie.Palette.classic.outline
-        bubbleBackground.lineWidth = 1.5
-        bubbleText.font = NSFont.systemFont(ofSize: 12, weight: .heavy)
-        bubbleText.fontSize = 12
-        bubbleText.foregroundColor = CGColor(srgbRed: 0.25, green: 0.13, blue: 0.05, alpha: 1)
-        bubbleText.alignmentMode = .center
-        bubble.addSublayer(bubbleBackground)
-        bubble.addSublayer(bubbleText)
-        bubble.isHidden = true
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        dog.frame = bounds
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) { onBoop() }
@@ -42,17 +34,16 @@ final class DoxieView: NSView {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         let scale = window?.backingScaleFactor ?? 2
-        (pool + [bubbleBackground]).forEach { $0.contentsScale = scale }
-        bubbleText.contentsScale = scale
+        pool.forEach { $0.contentsScale = scale }
+        zzz.forEach { $0.contentsScale = scale }
     }
 
-    func render(_ pose: Doxie.Pose, bubble text: String?) {
+    func render(_ pose: Doxie.Pose, at origin: CGPoint, facingRight: Bool) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         var canvas = LayerCanvas(view: self)
-        Doxie.draw(&canvas, pose)
+        Doxie.draw(&canvas, pose, at: origin, facingRight: facingRight, scale: Self.scale)
         for layer in pool[canvas.used...] where !layer.isHidden { layer.isHidden = true }
-        updateBubble(text, above: CGPoint(x: pose.pos.x, y: pose.pos.y - 48))
         CATransaction.commit()
     }
 
@@ -60,6 +51,7 @@ final class DoxieView: NSView {
         while pool.count <= i {
             let l = CAShapeLayer()
             l.lineCap = .round
+            l.lineJoin = .round
             l.contentsScale = window?.backingScaleFactor ?? 2
             dog.addSublayer(l)
             pool.append(l)
@@ -67,18 +59,55 @@ final class DoxieView: NSView {
         return pool[i]
     }
 
-    private func updateBubble(_ text: String?, above p: CGPoint) {
-        guard let text else { bubble.isHidden = true; bubbleString = nil; return }
-        if text != bubbleString {
-            bubbleString = text
-            let width = (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12, weight: .heavy)]).width + 16
-            let box = CGRect(x: -width / 2, y: -20, width: width, height: 20)
-            bubbleBackground.path = CGPath(roundedRect: box, cornerWidth: 10, cornerHeight: 10, transform: nil)
-            bubbleText.string = text
-            bubbleText.frame = box.offsetBy(dx: 0, dy: 3)
+    // MARK: Effects (run by Core Animation)
+
+    func hop() {
+        let jump = CASpringAnimation(keyPath: "transform.translation.y")
+        jump.fromValue = -14
+        jump.toValue = 0
+        jump.damping = 9
+        jump.initialVelocity = 2
+        jump.duration = jump.settlingDuration
+        dog.add(jump, forKey: "hop")
+    }
+
+    /// Three Zs drifting up from his head while he sleeps.
+    func showZzz(at head: CGPoint?) {
+        zzz.forEach { $0.removeFromSuperlayer() }
+        zzz.removeAll()
+        guard let head else { return }
+        for i in 0..<3 {
+            let z = CATextLayer()
+            z.string = "z"
+            z.font = NSFont.systemFont(ofSize: 16, weight: .black)
+            z.fontSize = 16
+            z.foregroundColor = .white
+            z.shadowColor = Doxie.Palette.cream.outline
+            z.shadowOpacity = 1
+            z.shadowRadius = 0.8
+            z.shadowOffset = .zero
+            z.alignmentMode = .center
+            z.contentsScale = window?.backingScaleFactor ?? 2
+            z.bounds = CGRect(x: 0, y: 0, width: 20, height: 22)
+            z.position = head
+            z.opacity = 0
+            layer?.addSublayer(z)
+            zzz.append(z)
+
+            let rise = CABasicAnimation(keyPath: "position")
+            rise.fromValue = NSValue(point: head)
+            rise.toValue = NSValue(point: CGPoint(x: head.x + 26, y: head.y - 38))
+            let grow = CABasicAnimation(keyPath: "transform.scale")
+            grow.fromValue = 0.6; grow.toValue = 1.25
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [0, 1, 1, 0]; fade.keyTimes = [0, 0.15, 0.7, 1]
+            let group = CAAnimationGroup()
+            group.animations = [rise, grow, fade]
+            group.duration = 3
+            group.repeatCount = .infinity
+            group.beginTime = CACurrentMediaTime() + Double(i)
+            z.add(group, forKey: "zzz")
         }
-        bubble.position = p
-        bubble.isHidden = false
     }
 }
 

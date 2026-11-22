@@ -1,19 +1,19 @@
 import AppKit
 
-/// The dog's silhouette for the menu bar. A template image, so macOS tints it
+/// His resting face, line only, for the menu bar. A template image, so macOS tints it
 /// for light and dark menu bars and the highlighted state.
 @MainActor
 enum MenuBarIcon {
     static let image: NSImage = {
-        let size = NSSize(width: 26, height: 18)
-        let image = NSImage(size: size, flipped: true) { rect in
+        let size = NSSize(width: 24, height: 18)
+        let image = NSImage(size: size, flipped: true) { _ in
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
-            // Draw the full-size dog side-on, then scale it into the menu bar slot.
-            ctx.scaleBy(x: 0.29, y: 0.29)
-            let pos = CGPoint(x: 42, y: 52)
-            let pose = Doxie.Pose(pos: pos, heading: 0,
-                                  feet: (0..<4).map { Doxie.restingFoot($0, pos: pos, heading: 0) })
-            Doxie.draw(ctx, pose, palette: .silhouette)
+            let clear = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0)
+            let black = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+            let lines = Doxie.Palette(coat: clear, ear: clear, feet: clear, outline: black, ink: black, shadow: clear)
+            // Just the head: clip away the long back that stretches out behind him.
+            ctx.clip(to: CGRect(x: 0, y: 0, width: size.width, height: size.height))
+            Doxie.draw(ctx, .rest(blink: false, breath: 0), at: CGPoint(x: 12, y: 16.5), scale: 0.27, palette: lines)
             return true
         }
         image.isTemplate = true

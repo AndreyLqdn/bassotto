@@ -1,231 +1,153 @@
 import CoreGraphics
 import Foundation
 
-/// Goose-style physics and behaviour. Works in screen points with y growing downwards.
-/// The body steers towards a target with acceleration and smooth turning; each paw stays
-/// planted until the body has moved on, then takes a quick step. That stepping is what
-/// makes him waddle when walking and scurry frantically when running.
+/// What the dog does, driven by what *you* do:
+/// - while you use the Mac he rests on the Dock (awake, blinking);
+/// - when you leave the mouse and keyboard alone (reading, watching a video) he gets up
+///   and waddles around the screen;
+/// - the moment you're back he runs home to the Dock and lies down again;
+/// - after a long absence he falls asleep on the Dock.
+/// Coordinates are screen points with y growing downwards.
 @MainActor
 final class Brain {
-    enum Task: Equatable {
-        case idle(until: TimeInterval)
-        case walk(to: CGPoint)
-        case zoom(to: CGPoint)
-        case chaseCursor
-        case dragCursor(until: TimeInterval, away: CGPoint)
-        case sleep
-    }
+    enum Mode { case resting, roaming, returning, sleeping }
 
-    struct Gait { let speed: CGFloat, accel: CGFloat, stepTime: Double, stepDist: CGFloat, lift: CGFloat }
-    static let walkGait = Gait(speed: 80, accel: 900, stepTime: 0.17, stepDist: 9, lift: 3.5)
-    static let runGait = Gait(speed: 300, accel: 2200, stepTime: 0.085, stepDist: 7, lift: 5)
-    static let chargeGait = Gait(speed: 420, accel: 3000, stepTime: 0.07, stepDist: 7, lift: 5.5)
+    // Desktop Goose's feel: walk 80 pt/s, accel 1300; we hurry home a bit faster.
+    private let walkSpeed: CGFloat = 80, runSpeed: CGFloat = 210, accel: CGFloat = 1300
 
-    var bounds: CGRect                       // where he may roam (screen, y down)
-    var mischief = true                      // allowed to steal the cursor
-    private(set) var pose: Doxie.Pose
-    private(set) var task: Task = .idle(until: 0)
-    private(set) var bubble: String?         // "woof!" / "z z z"
+    var home: CGPoint                         // his spot on the Dock edge
+    var bounds: CGRect                        // where he may wander
+    private(set) var mode: Mode = .resting
+    private(set) var pos: CGPoint
+    private(set) var facingRight = true
+    private(set) var blink = false
 
     private var vel = CGPoint.zero
-    private var steps: [(from: CGPoint, to: CGPoint, start: TimeInterval)?] = [nil, nil, nil, nil]
+    private var phase: CGFloat = 0
+    private var target: CGPoint?
+    private var pauseUntil: TimeInterval = 0
+    private var sleepWhenHome = false
     private var now: TimeInterval = 0
-    private var bubbleUntil: TimeInterval = 0
-    private var wagUntil: TimeInterval = 0
 
-    /// Called when he grabs the cursor and every frame while dragging it.
-    var moveCursor: ((CGPoint) -> Void)?
-    var cursor: () -> CGPoint = { .zero }
-
-    init(bounds: CGRect) {
+    init(home: CGPoint, bounds: CGRect) {
+        self.home = home
         self.bounds = bounds
-        let start = CGPoint(x: bounds.midX, y: bounds.maxY - 40)
-        pose = Doxie.Pose(pos: start, heading: 0,
-                          feet: (0..<4).map { Doxie.restingFoot($0, pos: start, heading: 0) })
+        pos = home
     }
 
-    /// Whether anything is animating (so the display link can stop when he's still).
-    var isAnimating: Bool {
-        if case .idle = task { return now < wagUntil || now < bubbleUntil || steps.contains { $0 != nil } }
-        if case .sleep = task { return false }
-        return true
-    }
-
-    var isAsleep: Bool { task == .sleep }
-
-    /// Sprinting or chasing: worth drawing at 60 fps.
-    var isFast: Bool {
-        switch task {
-        case .zoom, .chaseCursor: true
-        default: false
+    var pose: Doxie.Pose {
+        switch mode {
+        case .resting: .rest(blink: blink, breath: 0)
+        case .sleeping: .sleep(breath: 0)
+        case .roaming, .returning:
+            .walk(phase: phase, speed: mode == .returning ? 1 : min(1, hypot(vel.x, vel.y) / runSpeed))
         }
     }
 
-    // MARK: Commands
-
-    func comeHere() { wake(); task = .chaseCursor }
-    func boop() {
-        if isAsleep { wake(); return }
-        bark()
-        wagUntil = now + 1.5
-    }
-    func fallAsleep() {
-        task = .sleep
-        vel = .zero
-        bubble = "z z z"
-    }
-    func wake() {
-        guard isAsleep else { return }
-        task = .idle(until: now + 1)
-        bubble = nil
-        bark()
+    /// Whether the frame loop needs to run.
+    var isMoving: Bool {
+        switch mode {
+        case .returning: true
+        case .roaming: now >= pauseUntil
+        case .resting, .sleeping: false
+        }
     }
 
-    private func bark() {
-        bubble = "woof!"
-        bubbleUntil = now + 0.9
-        pose.mouthOpen = true
+    /// Clickable area around him, in screen space (y down).
+    var hitBox: CGRect {
+        switch mode {
+        case .resting, .sleeping: CGRect(x: pos.x - 46, y: pos.y - 56, width: 92, height: 62)
+        case .roaming, .returning: CGRect(x: pos.x - 50, y: pos.y - 62, width: 100, height: 66)
+        }
+    }
+
+    // MARK: Inputs
+
+    /// You stopped touching the Mac: time for a walk.
+    func userWentIdle() {
+        guard mode == .resting else { return }
+        mode = .roaming
+        pauseUntil = 0
+        pickTarget()
+    }
+
+    /// You're back: hurry home and lie down (not asleep).
+    func userCameBack() {
+        sleepWhenHome = false
+        switch mode {
+        case .roaming: mode = .returning; target = home
+        case .sleeping: mode = .resting
+        case .resting, .returning: break
+        }
+    }
+
+    /// You've been away a long time: go home and sleep.
+    func userLongGone() {
+        switch mode {
+        case .resting: mode = .sleeping
+        case .roaming: sleepWhenHome = true; mode = .returning; target = home
+        case .returning: sleepWhenHome = true
+        case .sleeping: break
+        }
+    }
+
+    func setBlink(_ closed: Bool) { blink = closed }
+
+    /// "Go for a walk" from the menu.
+    func goForAWalk() {
+        if mode == .sleeping { mode = .resting }
+        userWentIdle()
     }
 
     // MARK: Simulation
 
     func update(time: TimeInterval) {
-        let dt = min(time - now, 1.0 / 20)
+        let dt = CGFloat(min(time - now, 1.0 / 20))
         now = time
-        if bubbleUntil > 0, now > bubbleUntil, !isAsleep { bubble = nil; bubbleUntil = 0; pose.mouthOpen = false }
+        guard mode == .roaming || mode == .returning, let target else { return }
+        if mode == .roaming, now < pauseUntil { return }
 
-        var target: CGPoint?
-        var gait = Self.walkGait
-        switch task {
-        case .idle(let until):
-            if now >= until { decide() }
-        case .walk(let to):
-            target = to
-        case .zoom(let to):
-            target = to; gait = Self.runGait
-        case .chaseCursor:
-            target = cursor(); gait = Self.chargeGait
-            if distance(Doxie.mouth(pose), cursor()) < 14 { grabCursor() }
-        case .dragCursor(let until, let away):
-            target = away; gait = Self.walkGait
-            moveCursor?(Doxie.mouth(pose))
-            if now >= until { task = .idle(until: now + 1); bark() }
-        case .sleep:
-            pose.crouch = min(1, pose.crouch + CGFloat(dt) * 2)
-            pose.eyesClosed = true
-            return
-        }
-        pose.crouch = max(0, pose.crouch - CGFloat(dt) * 3)
-        pose.eyesClosed = false
+        let speedCap = mode == .returning ? runSpeed : walkSpeed
+        let to = CGPoint(x: target.x - pos.x, y: target.y - pos.y)
+        let dist = hypot(to.x, to.y)
 
-        steer(towards: target, gait: gait, dt: dt)
-        stepFeet(gait: gait)
-        animateBody(gait: gait)
+        if dist < 5 { arrive(); return }
 
-        if let target, distance(pose.pos, target) < 6, task != .chaseCursor {
-            if case .dragCursor = task { return }
-            vel = .zero
-            task = .idle(until: now + .random(in: 0.8...3.5))
-            if Double.random(in: 0..<1) < 0.3 { wagUntil = now + 1.2 }
-            if Double.random(in: 0..<1) < 0.15 { bark() }
-        }
+        // Accelerate straight at the target, capped, easing in over the last stretch.
+        let cap = min(speedCap, max(30, dist * 3))
+        vel.x += to.x / dist * accel * dt
+        vel.y += to.y / dist * accel * dt
+        let v = hypot(vel.x, vel.y)
+        if v > cap { vel.x *= cap / v; vel.y *= cap / v }
+        pos.x += vel.x * dt
+        pos.y += vel.y * dt
+
+        if vel.x > 6 { facingRight = true } else if vel.x < -6 { facingRight = false }
+        // Feet cycle about every 0.4 s walking (one step per 0.2 s, like the goose), faster running.
+        let cycle: CGFloat = mode == .returning ? 0.24 : 0.4
+        phase += dt * 2 * .pi / cycle * min(1, hypot(vel.x, vel.y) / max(1, speedCap * 0.5))
     }
 
-    /// Goose rules: mostly wander, sometimes zoomies, now and then go after the cursor.
-    private func decide() {
-        let roll = Double.random(in: 0..<1)
-        if mischief, roll < 0.06 {
-            task = .chaseCursor
-        } else if roll < 0.35 {
-            task = .zoom(to: randomPoint(minDistance: 400))
+    private func arrive() {
+        vel = .zero
+        if mode == .returning {
+            pos = home
+            mode = sleepWhenHome ? .sleeping : .resting
+            sleepWhenHome = false
+            target = nil
         } else {
-            task = .walk(to: randomPoint(minDistance: 120, maxDistance: 420))
+            pauseUntil = now + .random(in: 1...2.5)      // sniff around, then move on
+            pickTarget()
         }
     }
 
-    private func grabCursor() {
-        bark()
-        let away = CGPoint(x: pose.pos.x - cos(pose.heading) * 260, y: pose.pos.y - sin(pose.heading) * 160)
-        task = .dragCursor(until: now + 1.6, away: clamp(away))
+    /// A random spot within a short walk (1–6 s), like the goose's wandering.
+    private func pickTarget() {
+        let reach = walkSpeed * .random(in: 1...6)
+        let angle = CGFloat.random(in: 0..<(2 * .pi))
+        var p = CGPoint(x: pos.x + cos(angle) * reach, y: pos.y + sin(angle) * reach)
+        p.x = min(max(p.x, bounds.minX), bounds.maxX)
+        p.y = min(max(p.y, bounds.minY), bounds.maxY)
+        target = p
     }
-
-    private func steer(towards target: CGPoint?, gait: Gait, dt: Double) {
-        var desired = CGPoint.zero
-        if let target {
-            let to = CGPoint(x: target.x - pose.pos.x, y: target.y - pose.pos.y)
-            let dist = hypot(to.x, to.y)
-            if dist > 0.5 {
-                let speed = min(gait.speed, dist * 4)             // ease into the stop
-                desired = CGPoint(x: to.x / dist * speed, y: to.y / dist * speed)
-            }
-        }
-        // Accelerate towards the desired velocity.
-        let dv = CGPoint(x: desired.x - vel.x, y: desired.y - vel.y)
-        let dvLen = hypot(dv.x, dv.y), maxDv = gait.accel * CGFloat(dt)
-        let k = dvLen > maxDv ? maxDv / dvLen : 1
-        vel.x += dv.x * k; vel.y += dv.y * k
-        pose.pos.x += vel.x * CGFloat(dt); pose.pos.y += vel.y * CGFloat(dt)
-        pose.pos = clamp(pose.pos)
-
-        // Turn smoothly to face where he's going (dragging the cursor: walk backwards).
-        let speed = hypot(vel.x, vel.y)
-        if speed > 12 {
-            var want = atan2(vel.y, vel.x)
-            if case .dragCursor = task { want += .pi }
-            var delta = want - pose.heading
-            while delta > .pi { delta -= 2 * .pi }
-            while delta < -.pi { delta += 2 * .pi }
-            pose.heading += delta * min(1, CGFloat(dt) * 12)
-        }
-    }
-
-    private func stepFeet(gait: Gait) {
-        let lead = CGPoint(x: vel.x * 0.06, y: vel.y * 0.06)          // feet land a bit ahead
-        let center = CGPoint(x: pose.pos.x + lead.x, y: pose.pos.y + lead.y)
-        for i in 0..<4 {
-            if let step = steps[i] {
-                let t = min(1, (now - step.start) / gait.stepTime)
-                let e = CGFloat(t * t * (3 - 2 * t))
-                pose.feet[i] = CGPoint(x: step.from.x + (step.to.x - step.from.x) * e,
-                                       y: step.from.y + (step.to.y - step.from.y) * e)
-                pose.footLift[i] = sin(CGFloat(t) * .pi) * gait.lift
-                if t >= 1 { steps[i] = nil; pose.footLift[i] = 0 }
-                continue
-            }
-            let ideal = Doxie.restingFoot(i, pos: center, heading: pose.heading)
-            // Diagonal pairs alternate: a foot waits while its neighbours are mid-step.
-            let neighbours = i < 2 ? [1 - i, i + 2] : [5 - i, i - 2]
-            if distance(pose.feet[i], ideal) > gait.stepDist, neighbours.allSatisfy({ steps[$0] == nil }) {
-                steps[i] = (pose.feet[i], ideal, now)
-            }
-        }
-    }
-
-    private func animateBody(gait: Gait) {
-        let speed = hypot(vel.x, vel.y)
-        pose.bob = pose.footLift.reduce(0, +) * 0.25
-        pose.earFlap = min(1, max(0, (speed - 90) / 200))
-        if now < wagUntil {
-            pose.wag = CGFloat(sin(now * 22)) * 0.6
-        } else {
-            pose.wag = speed > 150 ? CGFloat(sin(now * 18)) * 0.15 : pose.wag * 0.9
-        }
-    }
-
-    // MARK: Helpers
-
-    private func randomPoint(minDistance: CGFloat, maxDistance: CGFloat = .greatestFiniteMagnitude) -> CGPoint {
-        for _ in 0..<12 {
-            let p = CGPoint(x: .random(in: bounds.minX...bounds.maxX), y: .random(in: bounds.minY...bounds.maxY))
-            let d = distance(p, pose.pos)
-            if d >= minDistance, d <= maxDistance { return p }
-        }
-        return CGPoint(x: .random(in: bounds.minX...bounds.maxX), y: .random(in: bounds.minY...bounds.maxY))
-    }
-
-    private func clamp(_ p: CGPoint) -> CGPoint {
-        CGPoint(x: min(max(p.x, bounds.minX), bounds.maxX), y: min(max(p.y, bounds.minY), bounds.maxY))
-    }
-
-    private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { hypot(a.x - b.x, a.y - b.y) }
 }
