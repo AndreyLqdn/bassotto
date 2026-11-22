@@ -10,7 +10,7 @@ final class DogSprites {
         let duration: CFTimeInterval
     }
 
-    private var cache: [Kawaii.Pose: Loop] = [:]
+    private var cache: [DogArt.Pose: Loop] = [:]
     private let scale: CGFloat
     private let pixelScale: CGFloat
 
@@ -20,23 +20,24 @@ final class DogSprites {
     }
 
     /// Frame count and length of each loop.
-    private static func spec(_ pose: Kawaii.Pose) -> (frames: Int, duration: Double) {
+    private static func spec(_ pose: DogArt.Pose) -> (frames: Int, duration: Double) {
         switch pose {
-        case .rest: (48, 4.0)     // 12 fps: one slow breath, six wags
-        case .sleep: (48, 4.0)    // 12 fps: one breath, bubble, drifting Zzz
-        case .walk: (12, 0.55)    // ~22 fps: one stride
+        case .stand: (48, 4.0)    // 12 fps: one slow breath, three wags
+        case .sleep: (48, 4.0)    // 12 fps: one breath, drifting Zzz
+        case .trot: (10, 0.42)    // ~24 fps: one stride
+        case .run: (8, 0.2)       // 40 fps: frantic little legs
         }
     }
 
-    func loop(_ pose: Kawaii.Pose) -> Loop {
+    func loop(_ pose: DogArt.Pose) -> Loop {
         if let cached = cache[pose] { return cached }
         let (count, duration) = Self.spec(pose)
         let scale = self.scale
-        let size = CGSize(width: Kawaii.canvas.width * scale, height: Kawaii.canvas.height * scale)
+        let size = CGSize(width: DogArt.canvas.width * scale, height: DogArt.canvas.height * scale)
         let frames: [CGImage] = (0..<count).compactMap { i in
-            let motion = Kawaii.Motion(u: Double(i) / Double(count), walking: pose == .walk)
+            let u = Double(i) / Double(count)
             let renderer = ImageRenderer(content:
-                Canvas { ctx, _ in Kawaii.draw(&ctx, pose: pose, motion: motion, scale: scale) }
+                Canvas { ctx, _ in DogArt.draw(&ctx, pose: pose, u: u, scale: scale) }
                     .frame(width: size.width, height: size.height)
             )
             renderer.scale = pixelScale

@@ -1,39 +1,44 @@
 import AppKit
 import QuartzCore
 
-/// Shows the dog as a Core Animation layer playing pre-rendered loops.
-/// The window server runs the animation, so a breathing, sleeping dog costs ~0% CPU.
+/// A full-width strip along the Dock. The dog is one Core Animation layer inside it:
+/// his pose loops and his movement across the strip are both run by the window server,
+/// so walking and sprinting cost the app almost nothing.
 final class DogView: NSView {
     static let scale: CGFloat = 0.6
-    static let spriteSize = CGSize(width: Kawaii.canvas.width * scale, height: Kawaii.canvas.height * scale)
+    static let spriteSize = CGSize(width: DogArt.canvas.width * scale, height: DogArt.canvas.height * scale)
+    /// How far below the ground line the strip extends (paws dangling over the Dock edge).
+    static let hang = (DogArt.canvas.height - DogArt.ground) * scale
+    static let height = spriteSize.height + 18   // room to hop
 
     var onBoop: () -> Void = {}
 
     private let sprite = CALayer()
     private var sprites: DogSprites?
-    private var shownPose: Kawaii.Pose?
+    private var shownPose: DogArt.Pose?
+    private var moveToken = 0
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
         layer?.backgroundColor = .clear
-        sprite.frame = CGRect(x: (frame.width - Self.spriteSize.width) / 2, y: 0,
-                              width: Self.spriteSize.width, height: Self.spriteSize.height)
-        sprite.contentsGravity = .resizeAspect
+        sprite.bounds = CGRect(origin: .zero, size: Self.spriteSize)
         sprite.anchorPoint = CGPoint(x: 0.5, y: 0)
-        sprite.position = CGPoint(x: frame.width / 2, y: 0)
+        sprite.position = CGPoint(x: frame.width * 0.3, y: 0)
+        sprite.contentsGravity = .resizeAspect
         layer?.addSublayer(sprite)
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
 
-    override var isFlipped: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    // Clicks only count on the dog itself; everywhere else falls through.
+    /// The clickable area: the dog himself, wherever he is mid-animation.
+    var dogFrame: CGRect { (sprite.presentation() ?? sprite).frame.insetBy(dx: 14, dy: 6) }
+
+    // Only the dog is clickable; the rest of the strip lets clicks fall through.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let local = convert(point, from: superview)
-        return sprite.frame.insetBy(dx: 6, dy: 4).contains(local) ? self : nil
+        dogFrame.contains(convert(point, from: superview)) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) { onBoop() }
@@ -46,9 +51,10 @@ final class DogView: NSView {
         if let pose = shownPose { shownPose = nil; show(pose) }
     }
 
-    /// Switches the looping animation to `pose`.
+    // MARK: Pose
+
     @MainActor
-    func show(_ pose: Kawaii.Pose) {
+    func show(_ pose: DogArt.Pose) {
         guard pose != shownPose, let sprites else { shownPose = pose; return }
         shownPose = pose
         let loop = sprites.loop(pose)
@@ -57,18 +63,70 @@ final class DogView: NSView {
         play.duration = loop.duration
         play.calculationMode = .discrete
         play.repeatCount = .infinity
-        play.isRemovedOnCompletion = false
         sprite.contents = loop.frames.first
-        sprite.removeAnimation(forKey: "loop")
         sprite.add(play, forKey: "loop")
     }
 
-    /// Mirrors the walk when he heads left. Rest and sleep always face the viewer.
-    func face(right: Bool, walking: Bool) {
+    func face(right: Bool, profile: Bool) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        sprite.transform = (walking && !right) ? CATransform3DMakeScale(-1, 1, 1) : CATransform3DIdentity
+        sprite.transform = (profile && !right) ? CATransform3DMakeScale(-1, 1, 1) : CATransform3DIdentity
         CATransaction.commit()
+    }
+
+    // MARK: Movement (run by the window server)
+
+    /// Where he is right now, even mid-sprint.
+    var currentX: CGFloat { (sprite.presentation() ?? sprite).position.x }
+
+    var range: ClosedRange<CGFloat> {
+        let half = Self.spriteSize.width / 2
+        return half...(bounds.width - half)
+    }
+
+    /// Moves him to `x` at `speed` points per second, then calls `arrived` (unless interrupted).
+    func move(to x: CGFloat, speed: CGFloat, skid: Bool, arrived: @escaping () -> Void) {
+        let from = currentX
+        let to = min(max(x, range.lowerBound), range.upperBound)
+        moveToken += 1
+        let token = moveToken
+
+        let travel = CABasicAnimation(keyPath: "position.x")
+        travel.fromValue = from
+        travel.toValue = to
+        travel.duration = max(Double(abs(to - from) / speed), 0.05)
+        travel.timingFunction = CAMediaTimingFunction(name: .linear)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        CATransaction.setCompletionBlock { [weak self] in
+            guard let self, token == self.moveToken else { return }
+            if skid { self.skid(direction: to > from ? 1 : -1) }
+            arrived()
+        }
+        sprite.position.x = to
+        sprite.add(travel, forKey: "move")
+        CATransaction.commit()
+    }
+
+    func stop() {
+        moveToken += 1
+        let x = currentX
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        sprite.removeAnimation(forKey: "move")
+        sprite.position.x = x
+        CATransaction.commit()
+    }
+
+    /// A little overshoot and settle after a sprint, like brakes on a polished floor.
+    private func skid(direction: CGFloat) {
+        let settle = CASpringAnimation(keyPath: "position.x")
+        settle.fromValue = sprite.position.x + direction * 10
+        settle.toValue = sprite.position.x
+        settle.damping = 11
+        settle.duration = settle.settlingDuration
+        sprite.add(settle, forKey: "skid")
     }
 
     func hop() {
@@ -81,22 +139,11 @@ final class DogView: NSView {
         sprite.add(jump, forKey: "hop")
     }
 
-    func setPaused(_ paused: Bool) {
-        // Freezing the layer clock stops the window server from redrawing him.
-        if paused {
-            sprite.timeOffset = sprite.convertTime(CACurrentMediaTime(), from: nil)
-            sprite.speed = 0
-        } else if sprite.speed == 0 {
-            let paused = sprite.timeOffset
-            sprite.speed = 1
-            sprite.timeOffset = 0
-            sprite.beginTime = 0
-            sprite.beginTime = sprite.convertTime(CACurrentMediaTime(), from: nil) - paused
-        }
+    /// Keeps him inside the strip after the screen changes size.
+    func clampIntoRange() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        sprite.position.x = min(max(sprite.position.x, range.lowerBound), range.upperBound)
+        CATransaction.commit()
     }
-}
-
-enum StageMetrics {
-    /// Room for the dog (120×67) plus a hop and the floating Zzz above him.
-    static let size = CGSize(width: 130, height: 90)
 }

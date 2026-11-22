@@ -8,7 +8,7 @@ reminds you to take breaks, and goes quiet when you're on a call.
 ## Principles
 
 - **Native only.** Swift, SwiftUI and AppKit, plus Apple frameworks. No third-party dependencies.
-- **Light.** Pre-rendered clips with hardware decoding. Near-zero CPU while he rests.
+- **Light.** Drawn in code, pre-rendered into loops that Core Animation plays. About 0% CPU, even while he sprints.
 - **Private.** Everything he notices stays on your Mac.
 - **No Xcode required.** Builds with the Command Line Tools and Swift Package Manager.
 
@@ -33,11 +33,12 @@ The `Personal/` folder is gitignored, so your content is never committed.
 
 ```
 Sources/Bassotto/        menu bar app
-  Stage/                 transparent panel that carries the dog, walking along the Dock
-  Dog/                   the dog: state model + view (placeholder until the Blender clips)
+  Stage/                 the strip above the Dock and the dog's behaviour
+  Dog/                   line-art renderer (DogArt), sprite loops, layer view, menu bar icon
   System/                launch at login
 Sources/BassottoWidget/  WidgetKit extension
 Support/                 Info.plists and entitlements
+scripts/AppIcon.swift    renders the app icon (make icon)
 scripts/bundle.sh        builds, bundles and signs the .app (Apple Development cert if present, else ad-hoc)
 ```
 

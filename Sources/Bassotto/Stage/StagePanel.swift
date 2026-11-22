@@ -1,8 +1,8 @@
 import AppKit
 
-/// A small borderless, transparent panel that carries the dog around the screen.
-/// It floats above normal windows, follows you to every Space (including full-screen apps)
-/// and never steals focus from the app you're using.
+/// The borderless, transparent strip the dog lives in. It sits just above the Dock's
+/// level (so sleeping paws can dangle over its edge), follows you to every Space
+/// including full-screen apps, and never steals focus from the app you're using.
 final class StagePanel: NSPanel {
     init(size: CGSize) {
         super.init(
@@ -14,7 +14,7 @@ final class StagePanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        level = .floating
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) + 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         isReleasedWhenClosed = false
         hidesOnDeactivate = false
