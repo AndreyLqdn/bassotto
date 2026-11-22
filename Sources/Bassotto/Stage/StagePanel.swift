@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 /// A small borderless, transparent panel that carries the dog around the screen.
 /// It floats above normal windows, follows you to every Space (including full-screen apps)
@@ -24,10 +23,4 @@ final class StagePanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-}
-
-/// Hosting view that reacts to the first click even though the panel never becomes key.
-/// Transparent pixels still let clicks through to the windows underneath.
-final class StageHostingView<Content: View>: NSHostingView<Content> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

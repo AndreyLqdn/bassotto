@@ -16,6 +16,7 @@ final class StageController: NSObject {
     private let runSpeed: CGFloat = 220
 
     private var panel: StagePanel?
+    private var dogView: DogView?
     private var displayLink: CADisplayLink?
     private var lastTimestamp: CFTimeInterval?
     private var x: CGFloat = 0
@@ -25,7 +26,12 @@ final class StageController: NSObject {
 
     func start() {
         let panel = StagePanel(size: size)
-        panel.contentView = StageHostingView(rootView: DogView(dog: dog))
+        let view = DogView(frame: CGRect(origin: .zero, size: size))
+        view.onBoop = { [weak self] in self?.boop() }
+        panel.contentView = view
+        dogView = view
+        dog.onChange = { [weak self] in self?.render() }
+        render()
         self.panel = panel
 
         x = ground.minX + (ground.maxX - ground.minX) * 0.3
@@ -38,23 +44,69 @@ final class StageController: NSObject {
             name: NSApplication.didChangeScreenParametersNotification, object: nil
         )
         rest(for: 1.5)
+        watchIdle()
+    }
+
+    private func render() {
+        dogView?.show(dog.pose)
+        dogView?.face(right: dog.facingRight, walking: dog.isWalking)
+    }
+
+    // MARK: Napping
+
+    /// He naps after 2 minutes without keyboard or mouse input and wakes on the next one.
+    /// Reads the system's idle counter, which needs no permission and sees no content.
+    private let napAfter: TimeInterval = 120
+    private var idleTimer: Timer?
+
+    private func watchIdle() {
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkIdle() }
+        }
+        idleTimer?.tolerance = 2
+    }
+
+    private func checkIdle() {
+        guard isVisible else { return }
+        let anyInput = CGEventType(rawValue: ~0)!
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
+        if !dog.isAsleep, idle >= napAfter {
+            stopWalking()
+            restTask?.cancel()
+            dog.isAsleep = true
+        } else if dog.isAsleep, idle < 5 {
+            wake()
+        }
+    }
+
+    private func wake() {
+        dog.isAsleep = false
+        dogView?.hop()
+        rest(for: 2)
+    }
+
+    func boop() {
+        if dog.isAsleep { wake() } else { dogView?.hop() }
     }
 
     // MARK: Menu actions
 
     func callToCursor() {
         if !isVisible { toggleVisible() }
+        dog.isAsleep = false
         walk(to: NSEvent.mouseLocation.x - size.width / 2, speed: runSpeed)
     }
 
     func toggleVisible() {
         dog.isVisible.toggle()
         if isVisible {
+            dogView?.setPaused(false)
             panel?.orderFrontRegardless()
             rest(for: 1)
         } else {
             stopWalking()
             restTask?.cancel()
+            dogView?.setPaused(true)
             panel?.orderOut(nil)
         }
     }
@@ -85,7 +137,7 @@ final class StageController: NSObject {
         restTask?.cancel()
         restTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, let self, self.isVisible else { return }
+            guard !Task.isCancelled, let self, self.isVisible, !self.dog.isAsleep else { return }
             self.wander()
         }
     }
