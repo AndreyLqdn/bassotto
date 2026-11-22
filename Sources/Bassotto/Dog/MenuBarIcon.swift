@@ -10,10 +10,11 @@ enum MenuBarIcon {
             guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
             let black = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
             let clear = CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0)
-            let silhouette = Doxie.Palette(coat: black, outline: black, ears: black, feet: black, eye: clear, shadow: clear)
-            var dog = Doxie.State(pos: CGPoint(x: 13, y: 14.5), direction: 0)
+            let silhouette = Doxie.Palette(body: black, outline: black, feet: black, nose: black, ears: black, eye: clear, shadowDot: clear)
+            ctx.scaleBy(x: 0.42, y: 0.42)
+            var dog = Doxie.State(pos: CGPoint(x: 30, y: 36), direction: 0)
             dog.wag = 0.5
-            Doxie.draw(ctx, dog, scale: 0.4, palette: silhouette)
+            Doxie.draw(ctx, dog, palette: silhouette)
             return true
         }
         image.isTemplate = true

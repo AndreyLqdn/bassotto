@@ -32,7 +32,8 @@ func renderIcon(side: Int) -> Data? {
         let d: CGFloat = (i == 0 || i == 3) ? 3 : -3
         dog.feet[i].x += f.x * d; dog.feet[i].y += f.y * d
     }
-    Doxie.draw(ctx, dog, scale: s / 105)
+    ctx.translateBy(x: dog.pos.x, y: dog.pos.y); ctx.scaleBy(x: s / 105, y: s / 105); ctx.translateBy(x: -dog.pos.x, y: -dog.pos.y)
+    Doxie.draw(ctx, dog)
 
     guard let image = ctx.makeImage() else { return nil }
     return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])

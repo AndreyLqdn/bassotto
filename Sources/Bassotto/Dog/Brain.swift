@@ -34,7 +34,8 @@ final class Brain {
     private var sleepWhenHome = false
     private var now: TimeInterval = 0
     private var accumulator: Double = 0
-    private var stepping: (pair: [Int], from: [CGPoint], dir: [CGPoint], start: TimeInterval)?
+    private var steps: [(from: CGPoint, dir: CGPoint, start: TimeInterval)?] = [nil, nil, nil, nil]
+    private var stepping: Bool { steps.contains { $0 != nil } }
 
     init(home: CGPoint, bounds: CGRect) {
         self.home = home
@@ -55,8 +56,8 @@ final class Brain {
     var isMoving: Bool {
         switch mode {
         case .returning: return true
-        case .roaming: return now < pauseUntil ? stepping != nil : true
-        case .resting, .sleeping: return state.lying < 0.99 || abs(angleDelta(state.direction, 90)) > 1 || stepping != nil
+        case .roaming: return now < pauseUntil ? stepping : true
+        case .resting, .sleeping: return state.lying < 0.99 || abs(angleDelta(state.direction, 90)) > 1 || stepping
         }
     }
 
@@ -97,7 +98,7 @@ final class Brain {
     private func goHome() {
         mode = .returning
         target = home
-        speed = runSpeed; stepTime = 0.13        // a dog's trot: quicker little steps than the goose
+        speed = runSpeed; stepTime = 0.2         // the goose's Run tier keeps 0.2 s steps
     }
 
     // MARK: Simulation (fixed 60 Hz ticks, like the goose)
@@ -178,28 +179,32 @@ final class Brain {
         speed = walkSpeed; stepTime = 0.2
     }
 
-    /// The goose's SolveFeet, with diagonal pairs for four paws.
+    /// The goose's SolveFeet, run once for the chest pair and once for the hip pair:
+    /// within a pair only one foot moves at a time (left checked first); a foot steps when
+    /// it's more than 5 pt from home, landing 2 pt past it, with a cubic ease in-out.
     private func solveFeet(time t: TimeInterval) {
-        let homes = (0..<4).map { Doxie.footHome($0, pos: state.pos, direction: state.direction) }
-        if let step = stepping {
-            let p = min(1, (t - step.start) / stepTime)
-            let e = CGFloat(p < 0.5 ? 4 * p * p * p : 1 - pow(-2 * p + 2, 3) / 2)   // cubic ease in-out
-            for (n, i) in step.pair.enumerated() {
-                let landing = CGPoint(x: homes[i].x + step.dir[n].x * 2, y: homes[i].y + step.dir[n].y * 2)
-                state.feet[i] = CGPoint(x: step.from[n].x + (landing.x - step.from[n].x) * e,
-                                        y: step.from[n].y + (landing.y - step.from[n].y) * e)
+        for pair in [[0, 1], [2, 3]] {
+            let homes = pair.map { Doxie.footHome($0, pos: state.pos, direction: state.direction) }
+            if let i = pair.first(where: { steps[$0] != nil }), let step = steps[i] {
+                let home = homes[pair.firstIndex(of: i)!]
+                let landing = CGPoint(x: home.x + step.dir.x * 2, y: home.y + step.dir.y * 2)
+                let p = (t - step.start) / stepTime
+                if p >= 1 {
+                    state.feet[i] = landing
+                    steps[i] = nil
+                } else {
+                    let e = CGFloat(p < 0.5 ? 4 * p * p * p : 1 - pow(-2 * p + 2, 3) / 2)
+                    state.feet[i] = CGPoint(x: step.from.x + (landing.x - step.from.x) * e,
+                                            y: step.from.y + (landing.y - step.from.y) * e)
+                }
+                continue
             }
-            if p >= 1 { stepping = nil }
-            return
-        }
-        for pair in [[0, 3], [1, 2]] where pair.contains(where: { distance(state.feet[$0], homes[$0]) > 5 }) {
-            let dirs = pair.map { i -> CGPoint in
-                let d = CGPoint(x: homes[i].x - state.feet[i].x, y: homes[i].y - state.feet[i].y)
+            for (n, i) in pair.enumerated() where hypot(state.feet[i].x - homes[n].x, state.feet[i].y - homes[n].y) > 5 {
+                let d = CGPoint(x: homes[n].x - state.feet[i].x, y: homes[n].y - state.feet[i].y)
                 let l = max(0.001, hypot(d.x, d.y))
-                return CGPoint(x: d.x / l, y: d.y / l)
+                steps[i] = (state.feet[i], CGPoint(x: d.x / l, y: d.y / l), t)
+                break
             }
-            stepping = (pair, pair.map { state.feet[$0] }, dirs, t)
-            return
         }
     }
 
