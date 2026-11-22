@@ -11,7 +11,7 @@ final class StageController: NSObject {
     let dog = DogModel()
     var isVisible: Bool { dog.isVisible }
 
-    private let size = CGSize(width: 140, height: 120)
+    private let size = StageMetrics.size
     private let walkSpeed: CGFloat = 70     // points per second
     private let runSpeed: CGFloat = 220
 
