@@ -5,8 +5,10 @@ struct BassottoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Bassotto", systemImage: "dog.fill") {
+        MenuBarExtra {
             MenuContent(stage: appDelegate.stage)
+        } label: {
+            Image(nsImage: MenuBarIcon.image)
         }
     }
 }
