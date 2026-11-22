@@ -21,6 +21,21 @@ cp Support/App/Info.plist       "$APP/Contents/Info.plist"
 cp "$BIN/BassottoWidget"        "$APPEX/Contents/MacOS/BassottoWidget"
 cp Support/Widget/Info.plist    "$APPEX/Contents/Info.plist"
 
+# Platform keys Xcode normally stamps into every bundle. WidgetKit uses them to
+# recognise the extension as a native macOS one.
+SDK_VER="$(xcrun --sdk macosx --show-sdk-version)"
+SDK_BUILD="$(xcrun --sdk macosx --show-sdk-build-version)"
+for PLIST in "$APP/Contents/Info.plist" "$APPEX/Contents/Info.plist"; do
+  /usr/libexec/PlistBuddy \
+    -c "Add :CFBundleSupportedPlatforms array" \
+    -c "Add :CFBundleSupportedPlatforms:0 string MacOSX" \
+    -c "Add :DTPlatformName string macosx" \
+    -c "Add :DTPlatformVersion string $SDK_VER" \
+    -c "Add :DTSDKName string macosx$SDK_VER" \
+    -c "Add :DTSDKBuild string $SDK_BUILD" \
+    "$PLIST"
+done
+
 # Signing identity: $SIGN_IDENTITY if set, else the first valid "Apple Development"
 # certificate (free with an Apple ID in Xcode → Settings → Accounts), else ad-hoc.
 # Widgets need a real certificate to appear in the widget gallery.
