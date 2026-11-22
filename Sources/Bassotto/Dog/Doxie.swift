@@ -95,8 +95,10 @@ enum Doxie {
         let showsBothEars = abs(right.y) < 0.35
         let earSides: [CGFloat] = showsBothEars ? [-1, 1] : [nearSide]
         let ears: [(CGPoint, CGPoint)] = earSides.map { side in
-            let root = add(add(neckHeadPoint, right, side * 5), fwd, -2)
-            let tip = add(add(add(root, up, -6 + s.neckLerp * 3), fwd, -2 - s.neckLerp * 5), right, side * 2)
+            // Facing you, the ears hang outside the eyes, framing the face.
+            let spread: CGFloat = showsBothEars ? 11 : 5
+            let root = add(add(neckHeadPoint, right, side * spread), fwd, -2)
+            let tip = add(add(add(root, up, -6 + s.neckLerp * 3), fwd, -2 - s.neckLerp * 5), right, side * (showsBothEars ? 3 : 2))
             return (root, tip)
         }
 
