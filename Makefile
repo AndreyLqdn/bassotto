@@ -11,7 +11,7 @@ run:
 # Regenerate Support/App/AppIcon.icns from the dog's line art.
 icon:
 	mkdir -p .build/icon
-	swiftc -parse-as-library -o .build/icon/render scripts/AppIcon.swift Sources/Bassotto/Dog/DogArt.swift
+	swiftc -parse-as-library -o .build/icon/render scripts/AppIcon.swift Sources/Bassotto/Dog/Doxie.swift
 	.build/icon/render .build/icon/AppIcon.iconset
 	iconutil -c icns .build/icon/AppIcon.iconset -o Support/App/AppIcon.icns
 

@@ -23,12 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 private struct MenuContent: View {
-    let stage: StageController
+    @Bindable var stage: StageController
     @State private var opensAtLogin = LaunchAtLogin.isEnabled
 
     var body: some View {
         Button("Come here") { stage.callToCursor() }
-        Button(stage.dog.isVisible ? "Put to bed" : "Wake up") { stage.toggleVisible() }
+        Button(stage.isVisible ? "Put to bed" : "Wake up") { stage.toggleVisible() }
+        Toggle("Mischief (steals your cursor)", isOn: $stage.mischief)
         Divider()
         Toggle("Open at login", isOn: $opensAtLogin)
             .onChange(of: opensAtLogin) { _, enabled in

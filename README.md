@@ -1,14 +1,14 @@
 # Bassotto
 
-A dachshund who lives on your Mac. He walks along the Dock, naps on your windows,
-reminds you to take breaks, and goes quiet when you're on a call.
+A dachshund who lives on your Mac. He waddles around your screen, has the zoomies,
+steals your cursor now and then, and naps when you step away.
 
 > Early work in progress.
 
 ## Principles
 
 - **Native only.** Swift, SwiftUI and AppKit, plus Apple frameworks. No third-party dependencies.
-- **Light.** Drawn in code, pre-rendered into loops that Core Animation plays. About 0% CPU, even while he sprints.
+- **Light.** A handful of shapes, updated per frame and drawn by Core Animation. About 2% CPU while he runs around, 0% at rest, ~20 MB.
 - **Private.** Everything he notices stays on your Mac.
 - **No Xcode required.** Builds with the Command Line Tools and Swift Package Manager.
 
@@ -33,8 +33,8 @@ The `Personal/` folder is gitignored, so your content is never committed.
 
 ```
 Sources/Bassotto/        menu bar app
-  Stage/                 the strip above the Dock and the dog's behaviour
-  Dog/                   line-art renderer (DogArt), sprite loops, layer view, menu bar icon
+  Stage/                 full-screen transparent stage and frame loop
+  Dog/                   Doxie (the drawing), Brain (goose-style physics, legs, behaviours), layer view
   System/                launch at login
 Sources/BassottoWidget/  WidgetKit extension
 Support/                 Info.plists and entitlements

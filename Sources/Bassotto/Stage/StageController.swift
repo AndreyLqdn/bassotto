@@ -1,176 +1,167 @@
 import AppKit
+import Observation
+import QuartzCore
 
-/// The dog's brain and his stage: a full-width transparent strip resting on the Dock.
-/// Behaviour is goose-like: frantic sprints, little trots, wagging pauses, and a nap
-/// on the Dock edge when nobody has touched the Mac for a while.
+/// Runs the dog: a small transparent window that follows him anywhere on the screen,
+/// a display link that only ticks while he's moving, and the menu actions.
 @MainActor
+@Observable
 final class StageController: NSObject {
-    let dog = DogModel()
-    var isVisible: Bool { dog.isVisible }
+    private(set) var isVisible = true
+    var mischief = true { didSet { brain?.mischief = mischief } }
 
-    private var panel: StagePanel?
-    private var dogView: DogView?
-    private var restTask: Task<Void, Never>?
-    private var idleTimer: Timer?
-    private let napAfter: TimeInterval = 120
+    @ObservationIgnored private var panel: StagePanel?
+    @ObservationIgnored private var view: DoxieView?
+    @ObservationIgnored private var brain: Brain?
+    @ObservationIgnored private var link: CADisplayLink?
+    @ObservationIgnored private var timers: [Timer] = []
+    @ObservationIgnored private let napAfter: TimeInterval = 120
 
     func start() {
-        let panel = StagePanel(size: CGSize(width: 800, height: DogView.height))
-        let view = DogView(frame: CGRect(origin: .zero, size: panel.frame.size))
-        view.onBoop = { [weak self] in self?.boop() }
-        panel.contentView = view
-        self.panel = panel
-        dogView = view
-        dog.onChange = { [weak self] in self?.render() }
+        let brain = Brain(bounds: roamBounds())
+        brain.cursor = { [weak self] in self?.cursorInScreenSpace() ?? .zero }
+        brain.moveCursor = { [weak self] p in self?.warpCursor(to: p) }
+        self.brain = brain
 
-        layoutStrip()
+        let panel = StagePanel(size: CGSize(width: 800, height: 600))
+        let view = DoxieView(frame: CGRect(origin: .zero, size: panel.frame.size))
+        if let screen = NSScreen.screens.first {
+            panel.setFrame(screen.frame, display: false)
+            view.frame = CGRect(origin: .zero, size: screen.frame.size)
+        }
+        view.onBoop = { [weak self] in self?.brain?.boop(); self?.wakeUp() }
+        panel.contentView = view
+        panel.ignoresMouseEvents = true
+        self.panel = panel
+        self.view = view
         render()
         panel.orderFrontRegardless()
+        wakeUp()
 
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(screensChanged),
-            name: NSApplication.didChangeScreenParametersNotification, object: nil
-        )
-        rest(for: 1.5)
-        idleTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.checkIdle() }
+        NotificationCenter.default.addObserver(self, selector: #selector(screensChanged),
+                                               name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        every(5) { $0.checkIdle() }
+        every(0.125) { $0.updateMouseCapture() }
+        // While he stands around, look back now and then to start the next adventure.
+        every(0.5) { $0.wakeUpIfIdleTaskDue() }
+    }
+
+    // MARK: Frame loop
+
+    /// Starts the display link (60 fps) if it isn't running.
+    private func wakeUp() {
+        guard link == nil, isVisible, let screen = panel?.screen ?? NSScreen.screens.first else { return }
+        let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        guard let brain else { return }
+        brain.update(time: link.timestamp)
+        render()
+        if !brain.isAnimating {           // standing still or asleep: stop redrawing
+            link.invalidate()
+            self.link = nil
         }
-        idleTimer?.tolerance = 2
-
-        // The strip covers the bottom of other windows, so it ignores the mouse unless the
-        // cursor is actually over the dog. Checked 8×/s: cheap, and needs no permission.
-        panel.ignoresMouseEvents = true
-        mouseTimer = Timer.scheduledTimer(withTimeInterval: 0.125, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateMouseCapture() }
-        }
-        mouseTimer?.tolerance = 0.05
     }
 
-    private var mouseTimer: Timer?
-
-    private func updateMouseCapture() {
-        guard let panel, let dogView, isVisible else { return }
-        let mouse = NSEvent.mouseLocation
-        let local = CGPoint(x: mouse.x - panel.frame.minX, y: mouse.y - panel.frame.minY)
-        let overDog = dogView.dogFrame.contains(local)
-        if panel.ignoresMouseEvents == overDog { panel.ignoresMouseEvents = !overDog }
+    private func wakeUpIfIdleTaskDue() {
+        guard link == nil, isVisible, let brain, !brain.isAsleep else { return }
+        wakeUp()                          // the brain decides on its next task in update()
     }
 
-    // MARK: Stage
-
-    /// The strip spans the primary screen just above the Dock (or the bottom edge when
-    /// the Dock is hidden), dipping slightly below so sleeping paws can dangle over it.
-    private func layoutStrip() {
-        guard let screen = NSScreen.screens.first, let panel else { return }
-        let visible = screen.visibleFrame
-        panel.setFrame(CGRect(x: visible.minX, y: visible.minY - DogView.hang,
-                              width: visible.width, height: DogView.height), display: false)
-        dogView?.frame = CGRect(origin: .zero, size: panel.frame.size)
-        dogView?.clampIntoRange()
-    }
-
-    @objc private func screensChanged() { layoutStrip() }
-
+    /// The window covers the whole screen and never moves; the dog's shape layers are
+    /// updated in place and the window server does the drawing.
     private func render() {
-        dogView?.show(dog.pose)
-        dogView?.face(right: dog.facingRight, profile: dog.pose != .sleep)
+        guard let brain, let view else { return }
+        view.render(brain.pose, bubble: brain.bubble)
+        // Walking is fine at 30 fps; dashes and chases get the full 60.
+        let fast = brain.isFast
+        let range = fast ? CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+                         : CAFrameRateRange(minimum: 24, maximum: 30, preferred: 30)
+        if link?.preferredFrameRateRange != range { link?.preferredFrameRateRange = range }
     }
 
-    // MARK: Behaviour
+    // MARK: Screen & cursor
 
-    private func rest(for seconds: Double) {
-        restTask?.cancel()
-        restTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, let self, self.isVisible, !self.dog.isAsleep else { return }
-            self.decide()
+    /// The primary screen in y-down coordinates, kept clear of the menu bar.
+    private func roamBounds() -> CGRect {
+        guard let screen = NSScreen.screens.first else { return CGRect(x: 0, y: 0, width: 1440, height: 900) }
+        let f = screen.frame, v = screen.visibleFrame
+        let top = f.maxY - v.maxY
+        return CGRect(x: f.minX + 60, y: top + 70, width: f.width - 120, height: v.height - 90)
+    }
+
+    @objc private func screensChanged() {
+        brain?.bounds = roamBounds()
+        if let screen = NSScreen.screens.first {
+            panel?.setFrame(screen.frame, display: false)
+            view?.frame = CGRect(origin: .zero, size: screen.frame.size)
         }
     }
 
-    /// Goose rules: usually a mad dash, sometimes a trot, sometimes just standing around.
-    private func decide() {
-        guard let view = dogView else { return }
-        let roll = Double.random(in: 0..<1)
-        if roll < 0.55 {
-            go(to: pickTarget(view, distance: .random(in: 250...700)), gait: .run, speed: .random(in: 300...420))
-        } else if roll < 0.85 {
-            go(to: pickTarget(view, distance: .random(in: 90...260)), gait: .trot, speed: 75)
-        } else {
-            rest(for: .random(in: 3...7))
-        }
+    private func cursorInScreenSpace() -> CGPoint {
+        let m = NSEvent.mouseLocation
+        let h = NSScreen.screens.first?.frame.maxY ?? 0
+        return CGPoint(x: m.x, y: h - m.y)
     }
 
-    private func pickTarget(_ view: DogView, distance: CGFloat) -> CGFloat {
-        let x = view.currentX
-        let r = view.range
-        let canGoRight = x + distance <= r.upperBound
-        let canGoLeft = x - distance >= r.lowerBound
-        let right = canGoRight && (!canGoLeft || Bool.random())
-        return right ? x + distance : x - distance
+    private func warpCursor(to p: CGPoint) {
+        // Global display coordinates are y-down from the top of the primary screen.
+        CGWarpMouseCursorPosition(p)
+        CGAssociateMouseAndMouseCursorPosition(1)
     }
 
-    private func go(to x: CGFloat, gait: DogModel.Gait, speed: CGFloat) {
-        guard let view = dogView else { return }
-        restTask?.cancel()
-        dog.facingRight = x > view.currentX
-        dog.gait = gait
-        view.move(to: x, speed: speed, skid: gait == .run) { [weak self] in
-            guard let self else { return }
-            self.dog.gait = .still
-            self.rest(for: .random(in: 1.5...6))
-        }
+    /// The window only takes clicks when the cursor is over the dog.
+    private func updateMouseCapture() {
+        guard let panel, let brain, isVisible else { return }
+        let c = cursorInScreenSpace()
+        let p = brain.pose.pos
+        let overDog = abs(c.x - p.x) < 40 && c.y > p.y - 40 && c.y < p.y + 12
+        if panel.ignoresMouseEvents == overDog { panel.ignoresMouseEvents = !overDog }
     }
 
     // MARK: Napping
 
-    /// Reads the system's idle time, which needs no permission and sees no content.
+    /// Uses the system idle time: no permission needed, no content seen.
     private func checkIdle() {
-        guard isVisible else { return }
-        let anyInput = CGEventType(rawValue: ~0)!
-        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
-        if !dog.isAsleep, idle >= napAfter {
-            fallAsleep()
-        } else if dog.isAsleep, idle < 5 {
-            wake()
+        guard isVisible, let brain else { return }
+        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        if !brain.isAsleep, idle >= napAfter {
+            brain.fallAsleep()
+            wakeUp()                      // one more frame to draw him lying down
+        } else if brain.isAsleep, idle < 5 {
+            brain.wake()
+            wakeUp()
         }
-    }
-
-    private func fallAsleep() {
-        restTask?.cancel()
-        dogView?.stop()
-        dog.gait = .still
-        dog.isAsleep = true
-    }
-
-    private func wake() {
-        dog.isAsleep = false
-        dogView?.hop()
-        rest(for: 2)
-    }
-
-    func boop() {
-        if dog.isAsleep { wake() } else { dogView?.hop() }
     }
 
     // MARK: Menu actions
 
     func callToCursor() {
         if !isVisible { toggleVisible() }
-        dog.isAsleep = false
-        let target = NSEvent.mouseLocation.x - (panel?.frame.minX ?? 0)
-        go(to: target, gait: .run, speed: 460)
+        brain?.comeHere()
+        wakeUp()
     }
 
     func toggleVisible() {
-        dog.isVisible.toggle()
+        isVisible.toggle()
         if isVisible {
             panel?.orderFrontRegardless()
-            rest(for: 1)
+            wakeUp()
         } else {
-            restTask?.cancel()
-            dogView?.stop()
-            dog.gait = .still
+            link?.invalidate(); link = nil
             panel?.orderOut(nil)
         }
+    }
+
+    private func every(_ seconds: TimeInterval, _ body: @escaping @MainActor (StageController) -> Void) {
+        let t = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { if let self { body(self) } }
+        }
+        t.tolerance = seconds * 0.3
+        timers.append(t)
     }
 }
