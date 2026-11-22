@@ -53,7 +53,8 @@ final class StageController: NSObject {
         let f = screen.frame, v = screen.visibleFrame
         let dockTop = f.maxY - v.minY                     // y-down
         let menuBar = f.maxY - v.maxY
-        let home = CGPoint(x: f.midX + 120, y: dockTop + 2)
+        // He lies facing you with his chin and front paws just over the Dock edge.
+        let home = CGPoint(x: f.midX + 120, y: dockTop - 12 * DoxieView.scale)
         let bounds = CGRect(x: f.minX + 60, y: menuBar + 70, width: f.width - 120, height: dockTop - menuBar - 75)
         return (home, bounds)
     }
@@ -94,10 +95,10 @@ final class StageController: NSObject {
 
     private func render() {
         guard let brain, let view else { return }
-        view.render(brain.pose, at: brain.pos, facingRight: brain.facingRight)
+        view.render(brain.pose)
         if brain.mode != shownMode {
             if shownMode == .returning, brain.mode == .resting { view.hop() }   // plops down home
-            let head = CGPoint(x: brain.pos.x + 22, y: brain.pos.y - 52)
+            let head = CGPoint(x: brain.home.x + 14, y: brain.home.y - 4)
             view.showZzz(at: brain.mode == .sleeping ? head : nil)
             shownMode = brain.mode
         }
@@ -120,9 +121,9 @@ final class StageController: NSObject {
 
     private func maybeBlink() {
         guard isVisible, let brain, brain.mode == .resting, Bool.random() else { return }
-        brain.setBlink(true); render()
+        brain.blink = true; render()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self] in
-            self?.brain?.setBlink(false); self?.render()
+            self?.brain?.blink = false; self?.render()
         }
     }
 
@@ -131,10 +132,9 @@ final class StageController: NSObject {
         guard let panel, let brain, isVisible else { return }
         let m = NSEvent.mouseLocation
         let c = CGPoint(x: m.x, y: (NSScreen.screens.first?.frame.maxY ?? 0) - m.y)
-        let box = brain.hitBox
-        let scaled = CGRect(x: brain.pos.x + (box.minX - brain.pos.x) * DoxieView.scale,
-                            y: brain.pos.y + (box.minY - brain.pos.y) * DoxieView.scale,
-                            width: box.width * DoxieView.scale, height: box.height * DoxieView.scale)
+        let box = brain.hitBox, p = brain.state.pos, k = DoxieView.scale
+        let scaled = CGRect(x: p.x + (box.minX - p.x) * k, y: p.y + (box.minY - p.y) * k,
+                            width: box.width * k, height: box.height * k)
         let over = scaled.contains(c)
         if panel.ignoresMouseEvents == over { panel.ignoresMouseEvents = !over }
     }

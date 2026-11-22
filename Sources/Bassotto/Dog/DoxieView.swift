@@ -6,7 +6,7 @@ import QuartzCore
 /// the hop are pure Core Animation, so they cost the app nothing.
 final class DoxieView: NSView {
     var onBoop: () -> Void = {}
-    static let scale: CGFloat = 0.8
+    static let scale: CGFloat = 1.15
 
     private let dog = CALayer()
     private var pool: [CAShapeLayer] = []
@@ -38,11 +38,11 @@ final class DoxieView: NSView {
         zzz.forEach { $0.contentsScale = scale }
     }
 
-    func render(_ pose: Doxie.Pose, at origin: CGPoint, facingRight: Bool) {
+    func render(_ state: Doxie.State) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         var canvas = LayerCanvas(view: self)
-        Doxie.draw(&canvas, pose, at: origin, facingRight: facingRight, scale: Self.scale)
+        Doxie.draw(&canvas, state, scale: Self.scale)
         for layer in pool[canvas.used...] where !layer.isHidden { layer.isHidden = true }
         CATransaction.commit()
     }
@@ -82,7 +82,7 @@ final class DoxieView: NSView {
             z.font = NSFont.systemFont(ofSize: 16, weight: .black)
             z.fontSize = 16
             z.foregroundColor = .white
-            z.shadowColor = Doxie.Palette.cream.outline
+            z.shadowColor = Doxie.Palette.red.outline
             z.shadowOpacity = 1
             z.shadowRadius = 0.8
             z.shadowOffset = .zero
